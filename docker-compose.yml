@@ -1,0 +1,143 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Databases
+  postgres-users:
+    image: postgres:15-alpine
+    container_name: astracart-users-db
+    environment:
+      POSTGRES_DB: astracart_users
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_users_data:/var/lib/postgresql/data
+    networks:
+      - astracart-network
+
+  postgres-products:
+    image: postgres:15-alpine
+    container_name: astracart-products-db
+    environment:
+      POSTGRES_DB: astracart_products
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_products_data:/var/lib/postgresql/data
+    networks:
+      - astracart-network
+
+  postgres-orders:
+    image: postgres:15-alpine
+    container_name: astracart-orders-db
+    environment:
+      POSTGRES_DB: astracart_orders
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_orders_data:/var/lib/postgresql/data
+    networks:
+      - astracart-network
+
+  # User Service
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: astracart-user-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-users:5432/astracart_users
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: password
+    depends_on:
+      - postgres-users
+    networks:
+      - astracart-network
+    restart: unless-stopped
+
+  # Product Service
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: astracart-product-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-products:5432/astracart_products
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: password
+    depends_on:
+      - postgres-products
+    networks:
+      - astracart-network
+    restart: unless-stopped
+
+  # Order Service
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: astracart-order-service
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-orders:5432/astracart_orders
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: password
+      EXTERNAL_SERVICES_USER-SERVICE: http://user-service:8081/auth
+      EXTERNAL_SERVICES_PRODUCT-SERVICE: http://product-service:8082/products
+    depends_on:
+      - postgres-orders
+      - user-service
+      - product-service
+    networks:
+      - astracart-network
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: astracart-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_CLOUD_GATEWAY_ROUTES[0]_ID: user-service
+      SPRING_CLOUD_GATEWAY_ROUTES[0]_URI: http://user-service:8081
+      SPRING_CLOUD_GATEWAY_ROUTES[0]_PATHS: /api/auth/**
+      SPRING_CLOUD_GATEWAY_ROUTES[0]_FILTERS[0]: StripPrefix=1
+      
+      SPRING_CLOUD_GATEWAY_ROUTES[1]_ID: product-service
+      SPRING_CLOUD_GATEWAY_ROUTES[1]_URI: http://product-service:8082
+      SPRING_CLOUD_GATEWAY_ROUTES[1]_PATHS: /api/products/**
+      SPRING_CLOUD_GATEWAY_ROUTES[1]_FILTERS[0]: StripPrefix=1
+      
+      SPRING_CLOUD_GATEWAY_ROUTES[2]_ID: order-service
+      SPRING_CLOUD_GATEWAY_ROUTES[2]_URI: http://order-service:8083
+      SPRING_CLOUD_GATEWAY_ROUTES[2]_PATHS: /api/orders/**
+      SPRING_CLOUD_GATEWAY_ROUTES[2]_FILTERS[0]: StripPrefix=1
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+    networks:
+      - astracart-network
+    restart: unless-stopped
+
+volumes:
+  postgres_users_data:
+  postgres_products_data:
+  postgres_orders_data:
+
+networks:
+  astracart-network:
+    driver: bridge
